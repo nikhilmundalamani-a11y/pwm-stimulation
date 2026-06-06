@@ -1,0 +1,640 @@
+/* ================================================================
+   PWM Signal Simulator — Stylesheet
+   Theme: Engineering Terminal / Dark Blue
+   ================================================================ */
+
+/* ── CSS Variables (Dark Theme defaults) ─────────────────────── */
+:root {
+  --bg-base:       #08090f;
+  --bg-panel:      #0d1117;
+  --bg-card:       #111827;
+  --bg-card-hover: #1a2236;
+  --border:        #1e2d45;
+  --border-accent: #1a6cff;
+
+  --text-primary:  #e2e8f0;
+  --text-secondary:#7a8fa6;
+  --text-accent:   #38bdf8;
+
+  --blue-glow:     #1a6cff;
+  --cyan:          #06b6d4;
+  --green:         #22c55e;
+  --amber:         #f59e0b;
+  --red:           #ef4444;
+
+  --font-mono:  'JetBrains Mono', monospace;
+  --font-ui:    'Rajdhani', sans-serif;
+
+  --radius:     8px;
+  --transition: 0.22s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+/* ── Light Theme Overrides ────────────────────────────────────── */
+[data-theme="light"] {
+  --bg-base:       #f0f4f8;
+  --bg-panel:      #ffffff;
+  --bg-card:       #f8fafc;
+  --bg-card-hover: #eef2f7;
+  --border:        #cbd5e1;
+  --border-accent: #1a6cff;
+
+  --text-primary:  #0f172a;
+  --text-secondary:#475569;
+  --text-accent:   #0369a1;
+}
+
+/* ── Reset & Base ─────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html { font-size: 16px; scroll-behavior: smooth; }
+
+body {
+  font-family: var(--font-ui);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  transition: background var(--transition), color var(--transition);
+}
+
+/* ── Scrollbar (Dark theme) ───────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: var(--bg-base); }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+
+/* ================================================================
+   TOP BAR
+   ================================================================ */
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.75rem 1.5rem;
+  background: var(--bg-panel);
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 100;
+  box-shadow: 0 2px 16px rgba(0,0,0,0.4);
+}
+
+.topbar-left {
+  display: flex; align-items: center; gap: 0.75rem;
+}
+
+/* Pulsing circle — "live" indicator */
+.logo-pulse {
+  width: 10px; height: 10px;
+  border-radius: 50%;
+  background: var(--green);
+  box-shadow: 0 0 0 0 rgba(34,197,94,0.6);
+  animation: pulse 2s infinite;
+}
+@keyframes pulse {
+  0%   { box-shadow: 0 0 0 0   rgba(34,197,94,0.6); }
+  70%  { box-shadow: 0 0 0 10px rgba(34,197,94,0.0); }
+  100% { box-shadow: 0 0 0 0   rgba(34,197,94,0.0); }
+}
+
+.logo-text {
+  font-family: var(--font-mono);
+  font-size: 1.25rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  color: var(--text-primary);
+}
+.logo-text .accent { color: var(--blue-glow); }
+
+.topbar-right {
+  display: flex; align-items: center; gap: 1rem;
+}
+
+.version-tag {
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  letter-spacing: 0.08em;
+}
+
+/* Theme toggle button */
+.theme-btn {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 0.35rem 0.65rem;
+  cursor: pointer;
+  font-size: 1rem;
+  transition: border-color var(--transition), background var(--transition);
+}
+.theme-btn:hover { border-color: var(--border-accent); background: var(--bg-card-hover); }
+
+/* ================================================================
+   DASHBOARD LAYOUT
+   ================================================================ */
+.dashboard {
+  display: grid;
+  grid-template-columns: 360px 1fr;
+  gap: 1.25rem;
+  padding: 1.25rem;
+  flex: 1;
+}
+
+/* ── Panel (shared card shell) ────────────────────────────────── */
+.panel {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.panel-title {
+  font-family: var(--font-ui);
+  font-size: 1rem;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  display: flex; align-items: center; gap: 0.5rem;
+}
+.panel-title .icon { color: var(--blue-glow); font-style: normal; }
+
+/* ================================================================
+   CONTROL PANEL — Left
+   ================================================================ */
+.panel-controls { max-height: calc(100vh - 80px); overflow-y: auto; }
+
+/* ── Form Fields ──────────────────────────────────────────────── */
+.field-group {
+  display: flex; flex-direction: column; gap: 0.4rem;
+}
+
+.field-group label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+
+.field-group input[type="number"] {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 1rem;
+  padding: 0.6rem 0.85rem;
+  width: 100%;
+  transition: border-color var(--transition), box-shadow var(--transition);
+  outline: none;
+}
+.field-group input[type="number"]:focus {
+  border-color: var(--border-accent);
+  box-shadow: 0 0 0 3px rgba(26,108,255,0.18);
+}
+
+.field-hint {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+/* ── Slider + Number sync row ─────────────────────────────────── */
+.slider-row {
+  display: flex; align-items: center; gap: 0.75rem;
+}
+.slider-row input[type="range"] {
+  flex: 1;
+  -webkit-appearance: none;
+  height: 4px;
+  border-radius: 99px;
+  background: linear-gradient(to right, var(--blue-glow) 50%, var(--border) 50%);
+  outline: none;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+.slider-row input[type="range"]::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 18px; height: 18px;
+  border-radius: 50%;
+  background: var(--blue-glow);
+  border: 2px solid var(--bg-panel);
+  box-shadow: 0 0 6px rgba(26,108,255,0.6);
+  transition: transform 0.1s;
+}
+.slider-row input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.2); }
+.slider-row input[type="number"] { width: 72px; flex: none; }
+
+/* ── Buttons ──────────────────────────────────────────────────── */
+.btn-generate, .btn-download {
+  width: 100%;
+  padding: 0.75rem;
+  border: none;
+  border-radius: var(--radius);
+  font-family: var(--font-ui);
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+  transition: transform 0.1s, box-shadow var(--transition), opacity var(--transition);
+}
+
+.btn-generate {
+  background: linear-gradient(135deg, #1a6cff, #0ea5e9);
+  color: #fff;
+  box-shadow: 0 4px 20px rgba(26,108,255,0.4);
+}
+.btn-generate:hover  { transform: translateY(-2px); box-shadow: 0 6px 24px rgba(26,108,255,0.55); }
+.btn-generate:active { transform: translateY(0);   }
+
+.btn-download {
+  background: var(--bg-card);
+  color: var(--text-accent);
+  border: 1px solid var(--border);
+  margin-top: -0.5rem;
+}
+.btn-download:hover:not(:disabled) { border-color: var(--cyan); background: var(--bg-card-hover); }
+.btn-download:disabled { opacity: 0.4; cursor: not-allowed; }
+
+.btn-icon { font-style: normal; }
+
+/* ── Error Box ────────────────────────────────────────────────── */
+.error-box {
+  background: rgba(239,68,68,0.12);
+  border: 1px solid var(--red);
+  border-radius: var(--radius);
+  padding: 0.65rem 0.9rem;
+  font-size: 0.85rem;
+  color: var(--red);
+  font-family: var(--font-mono);
+}
+.hidden { display: none !important; }
+
+/* ── Future Scope Card ────────────────────────────────────────── */
+.future-scope-card {
+  background: linear-gradient(135deg, rgba(26,108,255,0.06), rgba(6,182,212,0.04));
+  border: 1px solid rgba(26,108,255,0.25);
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+  margin-top: 0.5rem;
+}
+.future-scope-card h3 {
+  font-size: 0.85rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-accent);
+  margin-bottom: 0.6rem;
+}
+.future-scope-card ul {
+  list-style: none;
+  display: flex; flex-direction: column; gap: 0.5rem;
+}
+.future-scope-card li {
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
+  padding-left: 0.9rem;
+  position: relative;
+}
+.future-scope-card li::before {
+  content: "▸";
+  position: absolute; left: 0;
+  color: var(--blue-glow);
+}
+.future-scope-card li strong { color: var(--text-primary); }
+
+/* ================================================================
+   OUTPUT PANEL — Right
+   ================================================================ */
+.panel-output { gap: 1rem; }
+
+/* ── Waveform chart area ──────────────────────────────────────── */
+.chart-wrapper { flex: 1; position: relative; }
+
+#waveformChart {
+  width: 100%;
+  min-height: 280px;
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.chart-placeholder {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  text-align: center;
+  padding: 4rem 2rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  font-family: var(--font-mono);
+  line-height: 1.7;
+}
+.chart-placeholder strong { color: var(--text-accent); }
+
+/* ── Metric Cards Grid ────────────────────────────────────────── */
+.metrics-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 0.75rem;
+}
+
+.metric-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+  display: flex; flex-direction: column; align-items: center;
+  gap: 0.2rem;
+  transition: border-color var(--transition), background var(--transition), transform 0.15s;
+  text-align: center;
+}
+.metric-card:hover {
+  border-color: var(--border-accent);
+  background: var(--bg-card-hover);
+  transform: translateY(-2px);
+}
+
+.metric-label {
+  font-size: 0.68rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-secondary);
+}
+.metric-value {
+  font-family: var(--font-mono);
+  font-size: 1.3rem;
+  font-weight: 700;
+  color: var(--text-accent);
+  word-break: break-all;
+}
+.metric-unit {
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+/* ── Indicators Row ───────────────────────────────────────────── */
+.indicators-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem;
+}
+
+.indicator-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+  display: flex; flex-direction: column; gap: 0.6rem;
+  transition: border-color var(--transition);
+}
+.indicator-card:hover { border-color: var(--border-accent); }
+
+.indicator-title {
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  color: var(--text-secondary);
+}
+
+.indicator-label {
+  font-family: var(--font-mono);
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-align: center;
+}
+
+/* ── LED brightness bar ───────────────────────────────────────── */
+.led-bar-wrapper { display: flex; align-items: center; gap: 0.5rem; }
+.led-bar-track {
+  flex: 1;
+  height: 10px;
+  background: var(--border);
+  border-radius: 99px;
+  overflow: hidden;
+}
+.led-bar-fill {
+  height: 100%;
+  width: 0%;
+  border-radius: 99px;
+  background: linear-gradient(to right, #f59e0b, #fbbf24, #fef08a);
+  box-shadow: 0 0 8px rgba(251,191,36,0.5);
+  transition: width 0.5s cubic-bezier(0.4,0,0.2,1);
+}
+
+/* ── Motor Gauge ──────────────────────────────────────────────── */
+.gauge-wrapper {
+  display: flex; flex-direction: column; align-items: center; gap: 0.1rem;
+  position: relative;
+}
+.gauge-svg { width: 110px; }
+
+.gauge-track { stroke: var(--border); }
+.gauge-fill  {
+  stroke: var(--blue-glow);
+  filter: drop-shadow(0 0 4px rgba(26,108,255,0.7));
+  transition: stroke-dasharray 0.55s cubic-bezier(0.4,0,0.2,1);
+}
+
+.gauge-rpm {
+  font-family: var(--font-mono);
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text-accent);
+  margin-top: -0.25rem;
+}
+.gauge-unit {
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+
+/* ================================================================
+   FOOTER
+   ================================================================ */
+.site-footer {
+  text-align: center;
+  padding: 0.75rem;
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  border-top: 1px solid var(--border);
+  font-family: var(--font-mono);
+  letter-spacing: 0.04em;
+}
+
+/* ================================================================
+   RESPONSIVE BREAKPOINTS
+   ================================================================ */
+@media (max-width: 1024px) {
+  .dashboard { grid-template-columns: 1fr; }
+  .panel-controls { max-height: none; }
+  .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+}
+
+@media (max-width: 600px) {
+  .topbar { padding: 0.6rem 1rem; }
+  .version-tag { display: none; }
+  .dashboard { padding: 0.75rem; gap: 0.75rem; }
+  .metrics-grid { grid-template-columns: repeat(2, 1fr); }
+  .indicators-row { grid-template-columns: 1fr; }
+}
+
+/* ================================================================
+   LIVE PWM ANIMATION SECTION
+   ================================================================ */
+
+.anim-wrapper {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  transition: border-color var(--transition);
+}
+.anim-wrapper:hover { border-color: var(--border-accent); }
+
+/* Header row: title + controls */
+.anim-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.anim-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.anim-btn {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  padding: 0.3rem 0.7rem;
+  cursor: pointer;
+  transition: border-color var(--transition), background var(--transition);
+}
+.anim-btn:hover:not(:disabled) { border-color: var(--cyan); background: var(--bg-card-hover); }
+.anim-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+
+.anim-speed-label {
+  font-size: 0.72rem;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.anim-speed-select {
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  color: var(--text-primary);
+  font-family: var(--font-mono);
+  font-size: 0.75rem;
+  padding: 0.2rem 0.4rem;
+  cursor: pointer;
+}
+
+/* The animation canvas */
+#pwmCanvas {
+  width: 100%;
+  border-radius: 6px;
+  background: #060a12;
+  display: block;
+}
+[data-theme="light"] #pwmCanvas { background: #f1f5fb; }
+
+/* Indicator strip below canvas */
+.anim-indicators {
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  padding: 0.4rem 0;
+}
+
+/* Signal HIGH/LOW badge */
+.sig-state-badge {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: var(--text-primary);
+  font-weight: 600;
+}
+.sig-dot {
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: var(--border);
+  transition: background 0.05s, box-shadow 0.05s;
+}
+.sig-dot.high {
+  background: #22c55e;
+  box-shadow: 0 0 8px rgba(34,197,94,0.8);
+}
+.sig-dot.low {
+  background: #ef4444;
+  box-shadow: 0 0 8px rgba(239,68,68,0.5);
+}
+
+/* Animated LED bulb */
+.anim-led-wrap {
+  display: flex; flex-direction: column; align-items: center; gap: 0.25rem;
+}
+.anim-led {
+  width: 28px; height: 28px;
+  border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
+  background: #2a2a2a;
+  border: 2px solid #444;
+  transition: background 0.05s, box-shadow 0.05s;
+}
+.anim-led.on {
+  background: radial-gradient(circle at 40% 35%, #fff9c4, #fbbf24 60%, #d97706);
+  border-color: #fbbf24;
+  box-shadow: 0 0 14px 4px rgba(251,191,36,0.75);
+}
+.anim-led-label {
+  font-size: 0.65rem;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  text-transform: uppercase;
+}
+
+/* Motor fan */
+.anim-motor-wrap {
+  display: flex; flex-direction: column; align-items: center; gap: 0.25rem;
+}
+.motor-fan {
+  width: 30px; height: 30px;
+  transition: transform 0s linear;
+  /* rotation driven by JS */
+}
+
+/* ── Number input spinners hidden for clean look ──────────────── */
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; }
+input[type="number"] { -moz-appearance: textfield; }
+
+/* ── Smooth global transitions on theme switch ────────────────── */
+body, .panel, .metric-card, .indicator-card, .future-scope-card,
+.topbar, input, button {
+  transition-property: background, border-color, color, box-shadow;
+  transition-duration: 0.22s;
+  transition-timing-function: cubic-bezier(0.4,0,0.2,1);
+}
