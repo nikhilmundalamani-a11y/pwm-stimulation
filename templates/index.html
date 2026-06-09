@@ -4,236 +4,246 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>PWM Signal Simulator</title>
-
-  <!-- Google Fonts: JetBrains Mono for that engineering terminal feel -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link
-    href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Rajdhani:wght@400;500;600;700&display=swap"
-    rel="stylesheet"
-  />
-
-  <!-- Plotly for waveform rendering -->
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;600;700&family=Orbitron:wght@400;600;700;900&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet" />
   <script src="https://cdn.plot.ly/plotly-2.26.0.min.js"></script>
-
   <link rel="stylesheet" href="/static/style.css" />
 </head>
 <body>
 
-  <!-- ═══════════════════════════════════════════════════════════════
-       HEADER / NAV BAR
-  ═══════════════════════════════════════════════════════════════ -->
+  <!-- ═══════════════════════ TOPBAR ═══════════════════════════ -->
   <header class="topbar">
     <div class="topbar-left">
       <span class="logo-pulse"></span>
       <span class="logo-text">PWM<span class="accent"> Simulator</span></span>
     </div>
     <div class="topbar-right">
-      <span class="version-tag">v1.0 — EE Mini Project</span>
-      <!-- Dark / Light mode toggle -->
-      <button id="themeToggle" class="theme-btn" title="Toggle theme">
-        <span class="theme-icon">☀️</span>
+      <span class="version-tag">v2.0 — EE Mini Project</span>
+      <button class="theme-toggle-btn" id="themeToggleBtn" title="Toggle Dark / Light mode">
+        <span class="t-icon" id="themeIcon">☀️</span>
+        <span class="t-label" id="themeLabel">LIGHT</span>
       </button>
+      <div class="page-tabs">
+        <button class="tab-btn active" id="tabInput" onclick="showPage('input')">⚙ Parameters</button>
+        <button class="tab-btn"        id="tabOutput" onclick="showPage('output')" disabled>📈 Results</button>
+      </div>
     </div>
   </header>
 
-  <!-- ═══════════════════════════════════════════════════════════════
-       MAIN LAYOUT
+  <!-- ═══════════════════════════════════════════════════════════
+       PAGE 1 — SIGNAL PARAMETERS
   ═══════════════════════════════════════════════════════════════ -->
-  <main class="dashboard">
+  <main class="page" id="pageInput">
 
-    <!-- ─── LEFT PANEL: Controls ─────────────────────────────── -->
-    <section class="panel panel-controls">
-      <h2 class="panel-title"><span class="icon">⚙</span> Signal Parameters</h2>
+    <!-- Hero heading -->
+    <div class="hero">
+      <div class="hero-badge">⚡ PWM Signal Simulator</div>
+      <h1 class="hero-title">Configure Your Signal</h1>
+      <p class="hero-sub">Set the parameters below and generate a live PWM waveform</p>
+    </div>
 
-      <!-- Frequency -->
-      <div class="field-group">
-        <label for="frequency">Frequency (Hz)</label>
-        <input
-          type="number" id="frequency"
-          min="0.1" max="100000" step="0.1"
-          value="1000" placeholder="e.g. 1000"
-        />
-        <span class="field-hint">Range: 0.1 – 100 000 Hz</span>
-      </div>
+    <!-- Input card -->
+    <div class="input-card">
 
-      <!-- Duty Cycle — slider + number input synced -->
-      <div class="field-group">
-        <label for="dutyCycle">Duty Cycle (%)</label>
-        <div class="slider-row">
-          <input type="range"  id="dutyCycleSlider" min="0" max="100" step="1" value="50" />
-          <input type="number" id="dutyCycle"       min="0" max="100" step="1" value="50" placeholder="0–100" />
+      <div class="input-grid">
+
+        <!-- Frequency -->
+        <div class="field-group" id="grp-frequency">
+          <label for="frequency">
+            <span class="field-icon">〜</span> Frequency
+            <span class="field-unit">(Hz)</span>
+          </label>
+          <div class="input-with-status">
+            <input type="number" id="frequency" min="0.1" max="100000" step="0.1" value="1000" placeholder="e.g. 1000" />
+            <span class="input-status-icon" id="status-frequency"></span>
+          </div>
+          <div class="range-bar-wrap">
+            <div class="range-bar-track"><div class="range-bar-fill" id="bar-frequency"></div></div>
+            <span class="range-limits"><span>0.1 Hz</span><span>100,000 Hz</span></span>
+          </div>
+          <span class="field-hint" id="hint-frequency">Valid range: 0.1 – 100,000 Hz</span>
+          <span class="field-error hidden" id="err-frequency"></span>
         </div>
-        <span class="field-hint" id="dcHint">50 % duty cycle selected</span>
+
+        <!-- Max Voltage -->
+        <div class="field-group" id="grp-maxVoltage">
+          <label for="maxVoltage">
+            <span class="field-icon">⚡</span> Max Voltage
+            <span class="field-unit">(V)</span>
+          </label>
+          <div class="input-with-status">
+            <input type="number" id="maxVoltage" min="0.1" max="48" step="0.1" value="5" placeholder="e.g. 5" />
+            <span class="input-status-icon" id="status-maxVoltage"></span>
+          </div>
+          <div class="range-bar-wrap">
+            <div class="range-bar-track"><div class="range-bar-fill" id="bar-maxVoltage"></div></div>
+            <span class="range-limits"><span>0.1 V</span><span>48 V</span></span>
+          </div>
+          <span class="field-hint" id="hint-maxVoltage">Valid range: 0.1 – 48 V &nbsp;|&nbsp; Common: 3.3 V / 5 V / 12 V</span>
+          <span class="field-error hidden" id="err-maxVoltage"></span>
+        </div>
+
+        <!-- Duty Cycle — full width -->
+        <div class="field-group field-full" id="grp-dutyCycle">
+          <label for="dutyCycle">
+            <span class="field-icon">◑</span> Duty Cycle
+            <span class="field-unit">(%)</span>
+          </label>
+          <div class="slider-row">
+            <input type="range"  id="dutyCycleSlider" min="0" max="100" step="1" value="50" />
+            <div class="input-with-status" style="width:80px;flex:none">
+              <input type="number" id="dutyCycle" min="0" max="100" step="1" value="50" placeholder="0–100" style="width:100%" />
+              <span class="input-status-icon" id="status-dutyCycle"></span>
+            </div>
+          </div>
+          <div class="dc-preview-row">
+            <span class="field-hint" id="dcHint">50% — Medium LED range</span>
+            <div class="dc-mini-wave" id="dcMiniWave">
+              <div class="dc-mini-high" id="dcMiniHigh"></div>
+            </div>
+          </div>
+          <span class="field-error hidden" id="err-dutyCycle"></span>
+        </div>
+
+      </div><!-- /input-grid -->
+
+      <!-- Quick preset buttons -->
+      <div class="presets-row">
+        <span class="presets-label">Quick Presets:</span>
+        <button class="preset-btn" onclick="applyPreset(1000,25,5)">25% — Dim</button>
+        <button class="preset-btn" onclick="applyPreset(1000,50,5)">50% — Medium</button>
+        <button class="preset-btn" onclick="applyPreset(1000,75,5)">75% — Bright</button>
+        <button class="preset-btn" onclick="applyPreset(500,100,3.3)">100% — Full</button>
       </div>
 
-      <!-- Max Voltage -->
-      <div class="field-group">
-        <label for="maxVoltage">Max Voltage (V)</label>
-        <input
-          type="number" id="maxVoltage"
-          min="0.1" max="1000" step="0.1"
-          value="5" placeholder="e.g. 5"
-        />
-        <span class="field-hint">Typical: 3.3 V (logic) / 5 V (Arduino)</span>
-      </div>
-
-      <!-- Error message area -->
+      <!-- Per-field errors shown inline above; global fallback below -->
       <div id="errorMsg" class="error-box hidden"></div>
 
-      <!-- Generate button -->
+      <!-- Generate CTA -->
       <button id="generateBtn" class="btn-generate">
-        <span class="btn-icon">▶</span> Generate Waveform
+        <span>▶</span> Generate Waveform
       </button>
 
-      <!-- Download PNG button -->
-      <button id="downloadBtn" class="btn-download" disabled>
-        <span class="btn-icon">⬇</span> Download PNG
-      </button>
-
-      <!-- ── Future Scope Card ─────────────────────────────── -->
+      <!-- Future scope -->
       <div class="future-scope-card">
         <h3>🔭 Future Scope</h3>
         <ul>
-          <li><strong>Arduino Integration</strong> — Export duty cycle / frequency values directly to an Arduino sketch via Serial or USB CDC.</li>
-          <li><strong>Real-Time Hardware PWM</strong> — Stream live slider updates to an Arduino Uno/Mega using PySerial, controlling an actual LED or motor in real time.</li>
-          <li><strong>Oscilloscope View</strong> — Capture real waveform data from a hardware ADC and overlay it on the simulated waveform.</li>
-          <li><strong>Multi-Channel PWM</strong> — Simulate up to 6 independent PWM channels (mirrors Arduino Timer0/1/2).</li>
-          <li><strong>PWM-to-DAC Emulation</strong> — Visualise the RC low-pass filter output beside the raw PWM signal.</li>
+          <li><strong>Arduino Integration</strong> — Export values directly to an Arduino sketch via Serial / USB CDC.</li>
+          <li><strong>Real-Time Hardware PWM</strong> — Stream slider updates to Arduino via PySerial to control a real LED or motor.</li>
+          <li><strong>Oscilloscope View</strong> — Capture ADC data from hardware and overlay on the simulated waveform.</li>
+          <li><strong>Multi-Channel PWM</strong> — Simulate up to 6 independent channels (mirrors Arduino Timer0/1/2).</li>
+          <li><strong>PWM-to-DAC Emulation</strong> — Show RC low-pass filter output beside the raw PWM signal.</li>
         </ul>
       </div>
-    </section>
 
-    <!-- ─── RIGHT PANEL: Output ───────────────────────────────── -->
-    <section class="panel panel-output">
+    </div><!-- /input-card -->
+  </main>
 
-      <!-- Waveform chart -->
-      <div class="chart-wrapper">
-        <h2 class="panel-title"><span class="icon">📈</span> PWM Waveform</h2>
-        <div id="waveformChart"></div>
-        <p class="chart-placeholder" id="chartPlaceholder">
-          Set parameters on the left and click <strong>Generate Waveform</strong>.
-        </p>
+  <!-- ═══════════════════════════════════════════════════════════
+       PAGE 2 — RESULTS
+  ═══════════════════════════════════════════════════════════════ -->
+  <main class="page hidden" id="pageOutput">
+
+    <!-- Result topbar strip -->
+    <div class="result-strip">
+      <button class="btn-back" onclick="showPage('input')">← Back</button>
+      <div class="result-params" id="resultParams">—</div>
+      <button id="downloadBtn" class="btn-download-full">⬇ Download Report</button>
+    </div>
+
+    <!-- Waveform -->
+    <div class="out-card">
+      <div class="out-card-title"><span class="icon">📈</span> PWM Waveform</div>
+      <div id="waveformChart"></div>
+    </div>
+
+    <!-- Live Animation -->
+    <div class="out-card">
+      <div class="anim-header">
+        <div class="out-card-title"><span class="icon">⚡</span> Live Signal Animation</div>
+        <div class="anim-controls">
+          <button id="animPlayPause" class="anim-btn" disabled>⏸ Pause</button>
+          <button id="animReset"     class="anim-btn" disabled>↺ Reset</button>
+          <label class="anim-speed-label">Speed
+            <select id="animSpeed" class="anim-speed-select">
+              <option value="0.1">0.1×</option>
+              <option value="0.2">0.2×</option>
+              <option value="0.3">0.3×</option>
+              <option value="0.4">0.4×</option>
+              <option value="0.5" selected>0.5×</option>
+            </select>
+          </label>
+        </div>
       </div>
-
-      <!-- ── Live PWM Animation ──────────────────────────────── -->
-      <div class="anim-wrapper" id="animWrapper">
-        <div class="anim-header">
-          <span class="panel-title"><span class="icon">⚡</span> Live Signal Animation</span>
-          <div class="anim-controls">
-            <button id="animPlayPause" class="anim-btn" disabled title="Play / Pause">⏸ Pause</button>
-            <button id="animReset"     class="anim-btn" disabled title="Reset">↺ Reset</button>
-            <label class="anim-speed-label">
-              Speed
-              <select id="animSpeed" class="anim-speed-select">
-                <option value="0.1">0.1×</option>
-                <option value="0.2">0.2×</option>
-                <option value="0.3">0.3×</option>
-                <option value="0.4">0.4×</option>
-                <option value="0.5" selected>0.5×</option>
-              </select>
-            </label>
-          </div>
+      <canvas id="pwmCanvas" height="150"></canvas>
+      <div class="anim-indicators">
+        <div class="sig-state-badge">
+          <span class="sig-dot" id="sigDot"></span>
+          <span id="sigStateText">—</span>
         </div>
-
-        <!-- Canvas for animated waveform -->
-        <canvas id="pwmCanvas" height="150"></canvas>
-
-        <!-- Animated dot indicators below canvas -->
-        <div class="anim-indicators">
-          <!-- Signal state badge -->
-          <div class="sig-state-badge" id="sigStateBadge">
-            <span class="sig-dot" id="sigDot"></span>
-            <span id="sigStateText">—</span>
-          </div>
-          <!-- Animated LED bulb -->
-          <div class="anim-led-wrap">
-            <div class="anim-led" id="animLed"></div>
-            <span class="anim-led-label">LED</span>
-          </div>
-          <!-- Spinning motor fan -->
-          <div class="anim-motor-wrap">
-            <svg class="motor-fan" id="motorFan" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
-              <circle cx="20" cy="20" r="4" fill="#1a6cff"/>
-              <ellipse cx="20" cy="9"  rx="5" ry="8" fill="#1a6cff" opacity="0.8"/>
-              <ellipse cx="20" cy="31" rx="5" ry="8" fill="#1a6cff" opacity="0.8"/>
-              <ellipse cx="9"  cy="20" rx="8" ry="5" fill="#1a6cff" opacity="0.8"/>
-              <ellipse cx="31" cy="20" rx="8" ry="5" fill="#1a6cff" opacity="0.8"/>
-            </svg>
-            <span class="anim-led-label">Motor</span>
-          </div>
+        <div class="anim-led-wrap">
+          <div class="anim-led" id="animLed"></div>
+          <span class="anim-led-label">LED</span>
         </div>
-      </div><!-- /anim-wrapper -->
-
-      <!-- Metric Cards -->
-      <div class="metrics-grid" id="metricsGrid">
-
-        <div class="metric-card" id="cardAvgV">
-          <div class="metric-label">Avg Voltage</div>
-          <div class="metric-value" id="avgVoltage">—</div>
-          <div class="metric-unit">Volts</div>
+        <div class="anim-motor-wrap">
+          <svg class="motor-fan" id="motorFan" viewBox="0 0 40 40" xmlns="http://www.w3.org/2000/svg">
+            <circle cx="20" cy="20" r="4" fill="#f59e0b"/>
+            <ellipse cx="20" cy="9"  rx="5" ry="8" fill="#f59e0b" opacity="0.8"/>
+            <ellipse cx="20" cy="31" rx="5" ry="8" fill="#f59e0b" opacity="0.8"/>
+            <ellipse cx="9"  cy="20" rx="8" ry="5" fill="#f59e0b" opacity="0.8"/>
+            <ellipse cx="31" cy="20" rx="8" ry="5" fill="#f59e0b" opacity="0.8"/>
+          </svg>
+          <span class="anim-led-label">Motor</span>
         </div>
-
-        <div class="metric-card" id="cardOnTime">
-          <div class="metric-label">ON Time</div>
-          <div class="metric-value" id="onTime">—</div>
-          <div class="metric-unit">per cycle</div>
-        </div>
-
-        <div class="metric-card" id="cardOffTime">
-          <div class="metric-label">OFF Time</div>
-          <div class="metric-value" id="offTime">—</div>
-          <div class="metric-unit">per cycle</div>
-        </div>
-
-        <div class="metric-card" id="cardPeriod">
-          <div class="metric-label">Period</div>
-          <div class="metric-value" id="period">—</div>
-          <div class="metric-unit">ms</div>
-        </div>
-
       </div>
+    </div>
 
-      <!-- Indicator Row -->
-      <div class="indicators-row">
+    <!-- Metrics -->
+    <div class="metrics-grid">
+      <div class="metric-card">
+        <div class="metric-label">Avg Voltage</div>
+        <div class="metric-value" id="avgVoltage">—</div>
+        <div class="metric-unit">Volts</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">ON Time</div>
+        <div class="metric-value" id="onTime">—</div>
+        <div class="metric-unit">per cycle</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">OFF Time</div>
+        <div class="metric-value" id="offTime">—</div>
+        <div class="metric-unit">per cycle</div>
+      </div>
+      <div class="metric-card">
+        <div class="metric-label">Period</div>
+        <div class="metric-value" id="period">—</div>
+        <div class="metric-unit">ms</div>
+      </div>
+    </div>
 
-        <!-- LED Brightness -->
-        <div class="indicator-card" id="ledCard">
-          <div class="indicator-title">💡 LED Brightness</div>
-          <div class="led-bar-wrapper">
-            <div class="led-bar-track">
-              <div class="led-bar-fill" id="ledBarFill"></div>
-            </div>
-          </div>
-          <div class="indicator-label" id="ledLabel">—</div>
+    <!-- Indicators -->
+    <div class="indicators-row">
+      <div class="indicator-card">
+        <div class="indicator-title">💡 LED Brightness</div>
+        <div class="led-bar-track"><div class="led-bar-fill" id="ledBarFill"></div></div>
+        <div class="indicator-label" id="ledLabel">—</div>
+      </div>
+      <div class="indicator-card">
+        <div class="indicator-title">⚙ Motor Speed</div>
+        <div class="gauge-wrapper">
+          <svg class="gauge-svg" viewBox="0 0 120 70" xmlns="http://www.w3.org/2000/svg">
+            <path class="gauge-track" d="M 10 65 A 50 50 0 0 1 110 65" fill="none" stroke-width="10" stroke-linecap="round"/>
+            <path class="gauge-fill" id="gaugeFill" d="M 10 65 A 50 50 0 0 1 110 65" fill="none" stroke-width="10" stroke-linecap="round" stroke-dasharray="0 157"/>
+          </svg>
+          <div class="gauge-rpm" id="motorRPM">0</div>
+          <div class="gauge-unit">est. RPM</div>
         </div>
+        <div class="indicator-label" id="motorLabel">—</div>
+      </div>
+    </div>
 
-        <!-- Motor Speed -->
-        <div class="indicator-card" id="motorCard">
-          <div class="indicator-title">⚙ Motor Speed</div>
-          <!-- Circular gauge -->
-          <div class="gauge-wrapper">
-            <svg class="gauge-svg" viewBox="0 0 120 70" xmlns="http://www.w3.org/2000/svg">
-              <!-- Background arc -->
-              <path class="gauge-track"
-                d="M 10 65 A 50 50 0 0 1 110 65"
-                fill="none" stroke-width="10" stroke-linecap="round"/>
-              <!-- Filled arc -->
-              <path class="gauge-fill" id="gaugeFill"
-                d="M 10 65 A 50 50 0 0 1 110 65"
-                fill="none" stroke-width="10" stroke-linecap="round"
-                stroke-dasharray="0 157"/>
-            </svg>
-            <div class="gauge-rpm" id="motorRPM">0</div>
-            <div class="gauge-unit">est. RPM</div>
-          </div>
-          <div class="indicator-label" id="motorLabel">—</div>
-        </div>
-
-      </div><!-- /indicators-row -->
-
-    </section><!-- /panel-output -->
-
-  </main><!-- /dashboard -->
+  </main>
 
   <footer class="site-footer">
     <p>PWM Signal Simulator &nbsp;|&nbsp; College Mini Project &nbsp;|&nbsp; Built with Flask + Plotly</p>
