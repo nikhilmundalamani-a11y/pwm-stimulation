@@ -1,144 +1,305 @@
-/**
- * PWM Signal Simulator — Frontend Logic
- * =======================================
- * Responsibilities:
- *  1. Sync duty-cycle slider ↔ number input
- *  2. Send parameters to Flask /generate endpoint
- *  3. Render waveform with Plotly
- *  4. Update metric cards & indicators
- *  5. Dark / Light theme toggle
- *  6. Download chart as PNG
- */
-
 "use strict";
 
-/* ─── DOM References ──────────────────────────────────────────── */
+/* ================================================================
+   DOM REFERENCES
+   ================================================================ */
 const frequencyInput    = document.getElementById("frequency");
 const dutyCycleInput    = document.getElementById("dutyCycle");
 const dutyCycleSlider   = document.getElementById("dutyCycleSlider");
 const maxVoltageInput   = document.getElementById("maxVoltage");
 const generateBtn       = document.getElementById("generateBtn");
 const downloadBtn       = document.getElementById("downloadBtn");
-const themeToggle       = document.getElementById("themeToggle");
-const themeIcon         = themeToggle.querySelector(".theme-icon");
 const errorMsg          = document.getElementById("errorMsg");
-const chartPlaceholder  = document.getElementById("chartPlaceholder");
+const dcHint            = document.getElementById("dcHint");
+const dcMiniHigh        = document.getElementById("dcMiniHigh");
 
-// Metric value spans
+// Page 2 output elements
 const avgVoltageEl  = document.getElementById("avgVoltage");
 const onTimeEl      = document.getElementById("onTime");
 const offTimeEl     = document.getElementById("offTime");
 const periodEl      = document.getElementById("period");
-
-// LED indicator
 const ledBarFill    = document.getElementById("ledBarFill");
 const ledLabel      = document.getElementById("ledLabel");
-
-// Motor indicator
 const gaugeFill     = document.getElementById("gaugeFill");
 const motorRPM      = document.getElementById("motorRPM");
 const motorLabel    = document.getElementById("motorLabel");
+const resultParams  = document.getElementById("resultParams");
 
-// Hint text under slider
-const dcHint        = document.getElementById("dcHint");
+// Animation
+const canvas        = document.getElementById("pwmCanvas");
+const ctx           = canvas.getContext("2d");
+const animPlayPause = document.getElementById("animPlayPause");
+const animReset     = document.getElementById("animReset");
+const animSpeedSel  = document.getElementById("animSpeed");
+const sigDot        = document.getElementById("sigDot");
+const sigStateText  = document.getElementById("sigStateText");
+const animLed       = document.getElementById("animLed");
+const motorFan      = document.getElementById("motorFan");
 
-/* ─── Gauge arc constants ─────────────────────────────────────── */
-// The semicircle arc length = π × r ≈ 3.14159 × 50 ≈ 157
 const GAUGE_ARC_LEN = 157;
-
-/* ─── Plotly chart reference ──────────────────────────────────── */
 let chartRendered = false;
+let lastGeneratedData = null;
 
 
 /* ================================================================
-   1. DUTY CYCLE SLIDER ↔ NUMBER INPUT — SYNC
+   THEME TOGGLE — Dark / Light
    ================================================================ */
+const themeToggleBtn = document.getElementById("themeToggleBtn");
+const themeIcon      = document.getElementById("themeIcon");
+const themeLabel     = document.getElementById("themeLabel");
 
+themeToggleBtn.addEventListener("click", () => {
+  const html    = document.documentElement;
+  const isDark  = html.getAttribute("data-theme") === "dark";
+  const next    = isDark ? "light" : "dark";
+  html.setAttribute("data-theme", next);
+  themeIcon.textContent  = isDark ? "🌙" : "☀️";
+  themeLabel.textContent = isDark ? "DARK" : "LIGHT";
+
+  // Re-render Plotly chart colours if chart exists
+  if (chartRendered) {
+    const bg   = next === "dark" ? "#080800" : "#fffbf0";
+    const grid = next === "dark" ? "#1a1400" : "#fde68a";
+    const txt  = next === "dark" ? "#3a2f00" : "#b45309";
+    const line = next === "dark" ? "#f59e0b" : "#d97706";
+    Plotly.relayout("waveformChart", {
+      paper_bgcolor: bg, plot_bgcolor: bg,
+      "xaxis.gridcolor": grid, "yaxis.gridcolor": grid,
+      "font.color": txt,
+    });
+    Plotly.restyle("waveformChart", { "line.color": line }, [0]);
+  }
+});
+
+/* ================================================================
+   PAGE NAVIGATION
+   ================================================================ */
+function showPage(page) {
+  document.getElementById("pageInput").classList.toggle("hidden",  page !== "input");
+  document.getElementById("pageOutput").classList.toggle("hidden", page !== "output");
+  document.getElementById("tabInput").classList.toggle("active",   page === "input");
+  document.getElementById("tabOutput").classList.toggle("active",  page === "output");
+
+  // Resize canvas when switching to output page
+  if (page === "output") {
+    setTimeout(() => {
+      resizeCanvas();
+      if (animRunning && !animPaused) { lastTs = null; }
+    }, 50);
+  }
+}
+
+/* ================================================================
+   DUTY CYCLE SLIDER SYNC
+   ================================================================ */
 dutyCycleSlider.addEventListener("input", () => {
   const val = parseInt(dutyCycleSlider.value, 10);
   dutyCycleInput.value = val;
-  updateSliderBackground(val);
+  updateSliderBg(val);
   updateDcHint(val);
+  updateMiniWave(val);
 });
 
 dutyCycleInput.addEventListener("input", () => {
   let val = parseFloat(dutyCycleInput.value);
-  // Clamp to 0–100
   if (isNaN(val)) return;
   val = Math.max(0, Math.min(100, val));
   dutyCycleSlider.value = val;
-  updateSliderBackground(val);
+  updateSliderBg(val);
   updateDcHint(val);
+  updateMiniWave(val);
 });
 
-/** Fill the range track left-of-thumb with the accent colour */
-function updateSliderBackground(val) {
+function updateSliderBg(val) {
   dutyCycleSlider.style.background =
-    `linear-gradient(to right, var(--blue-glow) ${val}%, var(--border) ${val}%)`;
+    `linear-gradient(to right, #a855f7 ${val}%, #2e2660 ${val}%)`;
 }
-
 function updateDcHint(val) {
-  let label = "";
-  if (val <= 30)        label = "Dim LED range";
-  else if (val <= 70)   label = "Medium LED range";
-  else                  label = "Bright LED range";
-  dcHint.textContent = `${val}% duty cycle — ${label}`;
+  let label = val <= 30 ? "Dim LED range" : val <= 70 ? "Medium LED range" : "Bright LED range";
+  dcHint.textContent = `${val}% — ${label}`;
+}
+function updateMiniWave(val) {
+  dcMiniHigh.style.width = val + "%";
 }
 
-// Initialise on load
-updateSliderBackground(50);
+// Init
+updateSliderBg(50);
 updateDcHint(50);
-
+updateMiniWave(50);
 
 /* ================================================================
-   2. INPUT VALIDATION
+   PRESET BUTTONS
    ================================================================ */
+function applyPreset(freq, dc, vmax) {
+  frequencyInput.value    = freq;
+  dutyCycleInput.value    = dc;
+  dutyCycleSlider.value   = dc;
+  maxVoltageInput.value   = vmax;
+  updateSliderBg(dc);
+  updateDcHint(dc);
+  updateMiniWave(dc);
+}
 
-function validateInputs() {
-  const freq = parseFloat(frequencyInput.value);
-  const dc   = parseFloat(dutyCycleInput.value);
-  const vmax = parseFloat(maxVoltageInput.value);
+/* ================================================================
+   RANGE RULES
+   ================================================================ */
+const RULES = {
+  frequency: {
+    min: 0.1, max: 100000,
+    warnMin: 1, warnMax: 50000,
+    label: "Frequency",
+    unit: "Hz",
+    errors: {
+      empty:   "Frequency is required.",
+      nan:     "Frequency must be a number.",
+      tooLow:  "Frequency too low — minimum is 0.1 Hz.",
+      tooHigh: "Frequency too high — maximum is 100,000 Hz.",
+    },
+    warnings: {
+      warnLow:  "Very low frequency — signal will be very slow.",
+      warnHigh: "High frequency — may exceed microcontroller limits (Arduino max ~490 Hz on most pins).",
+    },
+  },
+  maxVoltage: {
+    min: 0.1, max: 48,
+    warnMin: 0.5, warnMax: 36,
+    label: "Max Voltage",
+    unit: "V",
+    errors: {
+      empty:   "Max Voltage is required.",
+      nan:     "Max Voltage must be a number.",
+      tooLow:  "Voltage too low — minimum is 0.1 V.",
+      tooHigh: "Voltage too high — maximum is 48 V (safe hardware limit).",
+    },
+    warnings: {
+      warnHigh: "High voltage — ensure your hardware supports this level.",
+    },
+  },
+  dutyCycle: {
+    min: 0, max: 100,
+    warnMin: 1, warnMax: 99,
+    label: "Duty Cycle",
+    unit: "%",
+    errors: {
+      empty:   "Duty Cycle is required.",
+      nan:     "Duty Cycle must be a number.",
+      tooLow:  "Duty Cycle cannot be negative.",
+      tooHigh: "Duty Cycle cannot exceed 100%.",
+    },
+    warnings: {
+      warnLow:  "Very low duty cycle — motor may stall below 5%.",
+      warnHigh: "Near 100% duty cycle — component may overheat.",
+    },
+  },
+};
 
-  if (isNaN(freq) || freq <= 0) {
-    showError("⚠ Frequency must be a positive number (Hz).");
+/* ── Per-field validation ──────────────────────────────────────── */
+function validateField(id, value) {
+  const rule   = RULES[id];
+  const grp    = document.getElementById(`grp-${id}`);
+  const errEl  = document.getElementById(`err-${id}`);
+  const barEl  = document.getElementById(`bar-${id}`);
+  const statEl = document.getElementById(`status-${id}`);
+  if (!rule || !grp) return true;
+
+  // Clear state
+  grp.classList.remove("is-valid", "is-error", "is-warning");
+  if (errEl)  { errEl.textContent = ""; errEl.classList.add("hidden"); }
+  if (barEl)  { barEl.classList.remove("is-error","is-warning","is-valid"); }
+  if (statEl) statEl.textContent = "";
+
+  const raw = value === undefined ? parseFloat(document.getElementById(id)?.value) : parseFloat(value);
+
+  // Check empty / NaN
+  const inputEl = document.getElementById(id);
+  if (inputEl && inputEl.value.trim() === "") {
+    setFieldState(grp, errEl, barEl, statEl, "error", rule.errors.empty, 0);
     return false;
   }
-  if (freq > 100000) {
-    showError("⚠ Frequency must be ≤ 100,000 Hz.");
+  if (isNaN(raw)) {
+    setFieldState(grp, errEl, barEl, statEl, "error", rule.errors.nan, 0);
     return false;
   }
-  if (isNaN(dc) || dc < 0 || dc > 100) {
-    showError("⚠ Duty Cycle must be between 0 and 100 (%).");
+  // Out of range
+  if (raw < rule.min) {
+    setFieldState(grp, errEl, barEl, statEl, "error", rule.errors.tooLow, 0);
     return false;
   }
-  if (isNaN(vmax) || vmax <= 0) {
-    showError("⚠ Max Voltage must be a positive number (V).");
+  if (raw > rule.max) {
+    setFieldState(grp, errEl, barEl, statEl, "error", rule.errors.tooHigh, 100);
     return false;
   }
-  clearError();
+  // Warnings
+  if (rule.warnMin !== undefined && raw < rule.warnMin) {
+    const pct = ((raw - rule.min) / (rule.max - rule.min)) * 100;
+    setFieldState(grp, errEl, barEl, statEl, "warning", rule.warnings.warnLow || "", pct);
+    return true; // warning doesn't block
+  }
+  if (rule.warnMax !== undefined && raw > rule.warnMax) {
+    const pct = ((raw - rule.min) / (rule.max - rule.min)) * 100;
+    setFieldState(grp, errEl, barEl, statEl, "warning", rule.warnings.warnHigh || "", pct);
+    return true;
+  }
+  // All good
+  const pct = ((raw - rule.min) / (rule.max - rule.min)) * 100;
+  setFieldState(grp, errEl, barEl, statEl, "valid", "", pct);
   return true;
 }
 
-function showError(msg) {
-  errorMsg.textContent = msg;
-  errorMsg.classList.remove("hidden");
-}
-function clearError() {
-  errorMsg.textContent = "";
-  errorMsg.classList.add("hidden");
+function setFieldState(grp, errEl, barEl, statEl, state, msg, barPct) {
+  grp.classList.add(state === "valid" ? "is-valid" : state === "warning" ? "is-warning" : "is-error");
+  if (errEl) {
+    if (msg) { errEl.textContent = msg; errEl.classList.remove("hidden"); }
+    else       errEl.classList.add("hidden");
+  }
+  if (barEl) {
+    barEl.style.width = Math.min(100, Math.max(0, barPct)) + "%";
+    barEl.classList.add(state === "valid" ? "is-valid" : state === "warning" ? "is-warning" : "is-error");
+  }
+  if (statEl) {
+    statEl.textContent = state === "valid" ? "✅" : state === "warning" ? "⚠️" : "❌";
+  }
 }
 
+/* ── Live validation on input events ──────────────────────────── */
+["frequency", "maxVoltage", "dutyCycle"].forEach(id => {
+  const el = document.getElementById(id);
+  if (el) el.addEventListener("input", () => validateField(id));
+});
+
+// Init bars on load
+window.addEventListener("load", () => {
+  validateField("frequency");
+  validateField("maxVoltage");
+  validateField("dutyCycle");
+});
+
+/* ── Full form validation before generate ─────────────────────── */
+function validateInputs() {
+  const freqOk  = validateField("frequency");
+  const voltOk  = validateField("maxVoltage");
+  const dcOk    = validateField("dutyCycle");
+  const allOk   = freqOk && voltOk && dcOk;
+
+  // Show/hide global error fallback
+  if (!allOk) {
+    showError("⚠ Please fix the errors above before generating.");
+  } else {
+    clearError();
+  }
+  return allOk;
+}
+function showError(msg) { errorMsg.textContent = msg; errorMsg.classList.remove("hidden"); }
+function clearError()   { errorMsg.textContent = ""; errorMsg.classList.add("hidden"); }
 
 /* ================================================================
-   3. GENERATE WAVEFORM — AJAX → Flask
+   GENERATE — AJAX TO FLASK
    ================================================================ */
-
 generateBtn.addEventListener("click", async () => {
   if (!validateInputs()) return;
 
-  // Button loading state
   generateBtn.disabled = true;
-  generateBtn.innerHTML = `<span class="btn-icon">⏳</span> Generating…`;
+  generateBtn.innerHTML = `<span>⏳</span> Generating…`;
 
   const payload = {
     frequency:   parseFloat(frequencyInput.value),
@@ -147,643 +308,615 @@ generateBtn.addEventListener("click", async () => {
   };
 
   try {
-    const response = await fetch("/generate", {
-      method:  "POST",
+    const res  = await fetch("/generate", {
+      method: "POST",
       headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify(payload),
+      body: JSON.stringify(payload),
     });
 
-    if (!response.ok) {
-      const err = await response.json();
-      showError("Server error: " + (err.error || response.statusText));
+    if (!res.ok) {
+      const err = await res.json();
+      showError("Server error: " + (err.error || res.statusText));
       return;
     }
 
-    const data = await response.json();
+    const data = await res.json();
+    lastGeneratedData = data;
 
-    // Render everything
+    // Switch to results page
+    showPage("output");
+    document.getElementById("tabOutput").disabled = false;
+
+    // Populate results
+    updateResultStrip(data);
     renderChart(data);
     updateMetrics(data);
     updateLED(data.duty_cycle);
     updateMotorGauge(data.duty_cycle, data.motor_rpm, data.motor_label);
 
-    // Enable download
-    downloadBtn.disabled = false;
-
-    // 🔴 Fire custom event → triggers live canvas animation
+    // Start animation
     document.dispatchEvent(new CustomEvent("pwmGenerated", { detail: data }));
 
   } catch (err) {
     showError("Network error — is Flask running? " + err.message);
   } finally {
     generateBtn.disabled = false;
-    generateBtn.innerHTML = `<span class="btn-icon">▶</span> Generate Waveform`;
+    generateBtn.innerHTML = `<span>▶</span> Generate Waveform`;
   }
 });
 
+/* ================================================================
+   RESULT PARAMETER STRIP
+   ================================================================ */
+function updateResultStrip(data) {
+  resultParams.innerHTML =
+    `<strong>${data.frequency} Hz</strong> &nbsp;|&nbsp; ` +
+    `<strong>${data.duty_cycle}%</strong> duty cycle &nbsp;|&nbsp; ` +
+    `<strong>${data.max_voltage} V</strong> peak &nbsp;|&nbsp; ` +
+    `Avg: <strong>${data.avg_voltage} V</strong>`;
+}
 
 /* ================================================================
-   4. PLOTLY CHART RENDERING
+   PLOTLY CHART
    ================================================================ */
-
 function renderChart(data) {
-  // Hide placeholder text
-  chartPlaceholder.classList.add("hidden");
+  const bg   = "#07051a";
+  const grid = "#1a1535";
+  const txt  = "#9d8ec9";
 
-  const isDark = document.documentElement.getAttribute("data-theme") !== "light";
-
-  const bgColor   = isDark ? "#0d1117" : "#ffffff";
-  const gridColor = isDark ? "#1e2d45" : "#e2e8f0";
-  const textColor = isDark ? "#7a8fa6" : "#475569";
-  const lineColor = "#1a6cff";
-  const fillColor = "rgba(26,108,255,0.10)";
-
-  // Waveform trace
   const trace = {
-    x:    data.time,
-    y:    data.voltage,
-    type: "scatter",
-    mode: "lines",
-    name: "PWM Signal",
-    line: {
-      color: lineColor,
-      width: 2.5,
-      shape: "hv",   // horizontal-then-vertical steps (square wave)
-    },
-    fill: "tozeroy",
-    fillcolor: fillColor,
+    x: data.time, y: data.voltage,
+    type: "scatter", mode: "lines", name: "PWM Signal",
+    line: { color: "#a855f7", width: 2.5, shape: "hv" },
+    fill: "tozeroy", fillcolor: "rgba(168,85,247,0.1)",
   };
-
-  // Average voltage reference line
   const avgTrace = {
-    x:    [data.time[0], data.time[data.time.length - 1]],
-    y:    [data.avg_voltage, data.avg_voltage],
-    type: "scatter",
-    mode: "lines",
+    x: [data.time[0], data.time[data.time.length - 1]],
+    y: [data.avg_voltage, data.avg_voltage],
+    type: "scatter", mode: "lines",
     name: `Avg: ${data.avg_voltage} V`,
-    line: {
-      color: "#22c55e",
-      width: 1.5,
-      dash:  "dot",
-    },
+    line: { color: "#4ade80", width: 1.5, dash: "dot" },
   };
 
   const layout = {
-    paper_bgcolor: bgColor,
-    plot_bgcolor:  bgColor,
-    margin:        { t: 30, r: 20, b: 50, l: 55 },
-    font:          { family: "JetBrains Mono, monospace", size: 11, color: textColor },
-    xaxis: {
-      title:      { text: "Time (ms)", standoff: 8 },
-      gridcolor:  gridColor,
-      zerolinecolor: gridColor,
-      tickfont:   { size: 10 },
-    },
+    paper_bgcolor: bg, plot_bgcolor: bg,
+    margin: { t: 30, r: 20, b: 50, l: 55 },
+    font: { family: "JetBrains Mono, monospace", size: 11, color: txt },
+    xaxis: { title: { text: "Time (ms)" }, gridcolor: grid, zerolinecolor: grid },
     yaxis: {
-      title:      { text: "Voltage (V)", standoff: 8 },
-      gridcolor:  gridColor,
-      zerolinecolor: gridColor,
-      range:      [-0.3, data.max_voltage * 1.2],
-      tickfont:   { size: 10 },
+      title: { text: "Voltage (V)" }, gridcolor: grid, zerolinecolor: grid,
+      range: [-0.3, data.max_voltage * 1.2],
     },
-    legend: {
-      x: 0.01, y: 0.99,
-      font: { size: 10 },
-      bgcolor: "rgba(0,0,0,0)",
-    },
+    legend: { x: 0.01, y: 0.99, bgcolor: "rgba(0,0,0,0)", font: { size: 10 } },
     hovermode: "x unified",
-    annotations: [
-      {
-        xref: "paper", yref: "paper",
-        x: 1, y: 1.04,
-        xanchor: "right", yanchor: "bottom",
-        text: `f = ${data.frequency} Hz | D = ${data.duty_cycle}% | Vpeak = ${data.max_voltage} V`,
-        showarrow: false,
-        font: { size: 10, color: textColor },
-      }
-    ],
-  };
-
-  const config = {
-    responsive:     true,
-    displayModeBar: false,   // hide default plotly toolbar (we have our own download btn)
   };
 
   if (chartRendered) {
-    Plotly.react("waveformChart", [trace, avgTrace], layout, config);
+    Plotly.react("waveformChart", [trace, avgTrace], layout, { responsive: true, displayModeBar: false });
   } else {
-    Plotly.newPlot("waveformChart", [trace, avgTrace], layout, config);
+    Plotly.newPlot("waveformChart", [trace, avgTrace], layout, { responsive: true, displayModeBar: false });
     chartRendered = true;
   }
 }
 
-
 /* ================================================================
-   5. METRIC CARDS UPDATE
+   METRIC CARDS
    ================================================================ */
-
 function updateMetrics(data) {
   animateValue(avgVoltageEl, data.avg_voltage + " V");
   animateValue(onTimeEl,     data.on_time);
   animateValue(offTimeEl,    data.off_time);
   animateValue(periodEl,     data.period_ms + " ms");
 }
-
-/** Simple fade-swap animation for metric values */
-function animateValue(el, newValue) {
-  el.style.opacity = "0";
-  el.style.transform = "translateY(6px)";
+function animateValue(el, val) {
+  el.style.opacity = "0"; el.style.transform = "translateY(6px)";
   setTimeout(() => {
-    el.textContent = newValue;
-    el.style.transition = "opacity 0.3s ease, transform 0.3s ease";
-    el.style.opacity   = "1";
-    el.style.transform = "translateY(0)";
+    el.textContent = val;
+    el.style.transition = "opacity 0.3s, transform 0.3s";
+    el.style.opacity = "1"; el.style.transform = "translateY(0)";
   }, 120);
 }
 
-
 /* ================================================================
-   6. LED BRIGHTNESS INDICATOR
+   LED INDICATOR
    ================================================================ */
-
 function updateLED(dc) {
   ledBarFill.style.width = dc + "%";
-
   let label, color;
-  if (dc <= 30) {
-    label = `🔅 Dim (${dc}%)`;
-    color = "linear-gradient(to right, #78350f, #d97706)";
-  } else if (dc <= 70) {
-    label = `💡 Medium (${dc}%)`;
-    color = "linear-gradient(to right, #d97706, #fbbf24)";
-  } else {
-    label = `🔆 Bright (${dc}%)`;
-    color = "linear-gradient(to right, #fbbf24, #fef08a)";
-  }
-
+  if (dc <= 30)      { label = `🔅 Dim (${dc}%)`;    color = "linear-gradient(to right,#78350f,#d97706)"; }
+  else if (dc <= 70) { label = `💡 Medium (${dc}%)`;  color = "linear-gradient(to right,#d97706,#fbbf24)"; }
+  else               { label = `🔆 Bright (${dc}%)`;  color = "linear-gradient(to right,#fbbf24,#fef08a)"; }
   ledBarFill.style.background = color;
   ledLabel.textContent = label;
 }
 
-
 /* ================================================================
-   7. MOTOR SPEED GAUGE
+   MOTOR GAUGE
    ================================================================ */
-
 function updateMotorGauge(dc, rpm, label) {
-  // Dash array: filled portion = (dc/100) × arc length
   const filled = (dc / 100) * GAUGE_ARC_LEN;
-  const gap    = GAUGE_ARC_LEN - filled;
-  gaugeFill.setAttribute("stroke-dasharray", `${filled} ${gap}`);
-
-  // Change colour based on speed
-  let strokeColor;
-  if (dc <= 20)       strokeColor = "#475569";
-  else if (dc <= 50)  strokeColor = "#3b82f6";
-  else if (dc <= 75)  strokeColor = "#0ea5e9";
-  else                strokeColor = "#22c55e";
-
-  gaugeFill.style.stroke = strokeColor;
-  gaugeFill.style.filter = `drop-shadow(0 0 5px ${strokeColor})`;
-
-  // Animate RPM counter
+  gaugeFill.setAttribute("stroke-dasharray", `${filled} ${GAUGE_ARC_LEN - filled}`);
+  const color = dc <= 20 ? "#52400a" : dc <= 50 ? "#d97706" : dc <= 75 ? "#f59e0b" : "#fbbf24";
+  gaugeFill.style.stroke  = color;
+  gaugeFill.style.filter  = `drop-shadow(0 0 5px ${color})`;
   animateValue(motorRPM, rpm.toLocaleString());
   motorLabel.textContent = label;
 }
 
-
 /* ================================================================
-   8. DARK / LIGHT THEME TOGGLE
+   DOWNLOAD REPORT — mirrors website layout exactly
    ================================================================ */
+downloadBtn.addEventListener("click", async () => {
+  if (!chartRendered || !lastGeneratedData) return;
 
-themeToggle.addEventListener("click", () => {
-  const html    = document.documentElement;
-  const isDark  = html.getAttribute("data-theme") === "dark";
-  const newTheme = isDark ? "light" : "dark";
+  const d       = lastGeneratedData;
+  const isLight = document.documentElement.getAttribute("data-theme") === "light";
 
-  html.setAttribute("data-theme", newTheme);
-  themeIcon.textContent = isDark ? "🌙" : "☀️";
+  /* ── Exact website colours ──────────────────────────────────── */
+  const C = isLight ? {
+    bgBase:    "#fffbf0",
+    bgPanel:   "#ffffff",
+    bgCard:    "#fff8e7",
+    bgInput:   "#fefce8",
+    border:    "#fcd34d",
+    orange:    "#f59e0b",
+    orangeDeep:"#d97706",
+    orangeBrt: "#fbbf24",
+    textPrim:  "#1a0f00",
+    textSec:   "#92400e",
+    textAcc:   "#b45309",
+    green:     "#16a34a",
+    topbarBg:  "#ffffff",
+  } : {
+    bgBase:    "#0a0a0a",
+    bgPanel:   "#111111",
+    bgCard:    "#181818",
+    bgInput:   "#0d0d0d",
+    border:    "#2a2200",
+    orange:    "#f59e0b",
+    orangeDeep:"#d97706",
+    orangeBrt: "#fbbf24",
+    textPrim:  "#fff8e7",
+    textSec:   "#a08060",
+    textAcc:   "#fbbf24",
+    green:     "#4ade80",
+    topbarBg:  "#111111",
+  };
 
-  // Re-render chart colours if chart exists
-  if (chartRendered) {
-    // Trigger a re-render with updated colours by clicking generate
-    // Instead we just relayout with new bg colours
-    const isNowDark  = newTheme === "dark";
-    const bgColor    = isNowDark ? "#0d1117" : "#ffffff";
-    const gridColor  = isNowDark ? "#1e2d45" : "#e2e8f0";
-    const textColor  = isNowDark ? "#7a8fa6" : "#475569";
-
-    Plotly.relayout("waveformChart", {
-      paper_bgcolor: bgColor,
-      plot_bgcolor:  bgColor,
-      "xaxis.gridcolor":  gridColor,
-      "yaxis.gridcolor":  gridColor,
-      "font.color":        textColor,
-    });
-  }
-});
-
-
-/* ================================================================
-   9. DOWNLOAD WAVEFORM AS PNG
-   ================================================================ */
-
-downloadBtn.addEventListener("click", () => {
-  if (!chartRendered) return;
-
-  const freq = frequencyInput.value || "unknown";
-  const dc   = dutyCycleInput.value || "unknown";
-
-  // Plotly's built-in image export
-  Plotly.downloadImage("waveformChart", {
-    format:   "png",
-    width:    1200,
-    height:   500,
-    filename: `pwm_waveform_${freq}Hz_${dc}pct`,
+  /* ── Re-render Plotly with correct bg for download ───────────── */
+  await Plotly.relayout("waveformChart", {
+    paper_bgcolor: C.bgCard,
+    plot_bgcolor:  C.bgCard,
+    "xaxis.gridcolor": C.border,
+    "yaxis.gridcolor": C.border,
+    "font.color": C.textSec,
   });
+
+  const imgData = await Plotly.toImage("waveformChart", {
+    format: "png", width: 1120, height: 380,
+  });
+
+  /* ── Restore chart to screen colours after capture ───────────── */
+  const screenBg   = isLight ? "#fffbf0" : "#080800";
+  const screenGrid = isLight ? "#fde68a" : "#1a1400";
+  const screenTxt  = isLight ? "#b45309" : "#3a2f00";
+  Plotly.relayout("waveformChart", {
+    paper_bgcolor: screenBg, plot_bgcolor: screenBg,
+    "xaxis.gridcolor": screenGrid,
+    "yaxis.gridcolor": screenGrid,
+    "font.color": screenTxt,
+  });
+
+  const waveImg = new Image();
+  waveImg.src   = imgData;
+
+  waveImg.onload = () => {
+    /* ── Canvas dimensions ──────────────────────────────────────── */
+    const W      = 1200;
+    const TOPBAR = 52;   // topbar height
+    const STRIP  = 56;   // result-strip height
+    const PAD    = 40;
+    const CHART_W = waveImg.width;
+    const CHART_H = waveImg.height;
+    const METRICS_H = 90;   // metric cards row
+    const IND_H     = 110;  // indicators row
+    const FOOTER_H  = 36;
+
+    const H = TOPBAR + STRIP + 16 + CHART_H + 16 + METRICS_H + 12 + IND_H + FOOTER_H;
+
+    const oc  = document.createElement("canvas");
+    oc.width  = W; oc.height = H;
+    const c   = oc.getContext("2d");
+
+    const r = (x, y, w, h, rad) => {
+      c.beginPath();
+      c.roundRect(x, y, w, h, rad);
+      c.fill();
+    };
+
+    /* ── 1. Base background ──────────────────────────────────────── */
+    c.fillStyle = C.bgBase;
+    c.fillRect(0, 0, W, H);
+
+    /* ── 2. Topbar ───────────────────────────────────────────────── */
+    c.fillStyle = C.topbarBg;
+    c.fillRect(0, 0, W, TOPBAR);
+    // bottom border
+    c.fillStyle = C.border;
+    c.fillRect(0, TOPBAR - 1, W, 1);
+    // orange top accent bar
+    const tg = c.createLinearGradient(0,0,W,0);
+    tg.addColorStop(0,   C.orangeDeep);
+    tg.addColorStop(0.5, C.orangeBrt);
+    tg.addColorStop(1,   C.orangeDeep);
+    c.fillStyle = tg;
+    c.fillRect(0, 0, W, 5);
+    // pulsing dot
+    c.fillStyle = C.green;
+    c.beginPath(); c.arc(PAD, TOPBAR/2 + 2, 5, 0, Math.PI*2); c.fill();
+    // logo text
+    c.font = "bold 18px Arial, sans-serif";
+    c.fillStyle = C.textPrim;
+    c.fillText("PWM", PAD + 14, TOPBAR/2 + 7);
+    c.fillStyle = C.orange;
+    c.fillText(" Simulator", PAD + 54, TOPBAR/2 + 7);
+    // right side — version
+    c.font = "11px 'Courier New', monospace";
+    c.fillStyle = C.textSec;
+    c.fillText("v2.0 — EE Mini Project  |  Waveform Report", W - PAD - 320, TOPBAR/2 + 5);
+
+    /* ── 3. Result strip ─────────────────────────────────────────── */
+    const stripY = TOPBAR + 10;
+    c.fillStyle = C.bgPanel;
+    r(PAD, stripY, W - PAD*2, STRIP - 8, 10);
+    c.strokeStyle = C.border; c.lineWidth = 1;
+    c.beginPath(); c.roundRect(PAD, stripY, W - PAD*2, STRIP - 8, 10); c.stroke();
+    // orange left bar
+    c.fillStyle = C.orange;
+    r(PAD, stripY, 4, STRIP - 8, [10,0,0,10]);
+    // param text
+    c.font = "13px 'Courier New', monospace";
+    c.fillStyle = C.textSec;
+    c.fillText("Signal Parameters:", PAD + 20, stripY + 20);
+    c.font = "bold 13px 'Courier New', monospace";
+    c.fillStyle = C.textAcc;
+    const paramStr = [
+      `Freq: ${d.frequency} Hz`,
+      `Duty: ${d.duty_cycle}%`,
+      `Vpeak: ${d.max_voltage} V`,
+      `Vavg: ${d.avg_voltage} V`,
+      `ON: ${d.on_time}`,
+      `OFF: ${d.off_time}`,
+      `Period: ${d.period_ms} ms`,
+      `LED: ${d.led_label}`,
+      `Motor: ~${d.motor_rpm} RPM`,
+    ];
+    let px = PAD + 20;
+    paramStr.forEach((p, i) => {
+      if (i > 0) { c.fillStyle = C.border; c.fillText(" | ", px - 4, stripY + 40); px += 12; }
+      c.fillStyle = C.textAcc;
+      c.fillText(p, px, stripY + 40);
+      px += c.measureText(p).width + 16;
+    });
+
+    /* ── 4. Chart card ───────────────────────────────────────────── */
+    const chartY = TOPBAR + STRIP + 14;
+    c.fillStyle = C.bgPanel;
+    r(PAD, chartY, W - PAD*2, CHART_H + 32, 12);
+    c.strokeStyle = C.border; c.lineWidth = 1;
+    c.beginPath(); c.roundRect(PAD, chartY, W - PAD*2, CHART_H + 32, 12); c.stroke();
+    // card title
+    c.font = "bold 11px Arial, sans-serif";
+    c.fillStyle = C.textSec;
+    c.fillText("📈  PWM WAVEFORM", PAD + 16, chartY + 18);
+    c.fillStyle = C.orange;
+    c.fillRect(PAD + 16, chartY + 22, 100, 2);
+    // chart image
+    const chartX = PAD + (W - PAD*2 - CHART_W) / 2;
+    c.drawImage(waveImg, chartX, chartY + 28);
+
+    /* ── 5. Metric cards row ─────────────────────────────────────── */
+    const metricsY = chartY + CHART_H + 48;
+    const metrics = [
+      { label: "AVG VOLTAGE", value: d.avg_voltage + " V" },
+      { label: "ON TIME",     value: d.on_time },
+      { label: "OFF TIME",    value: d.off_time },
+      { label: "PERIOD",      value: d.period_ms + " ms" },
+    ];
+    const cardW = (W - PAD*2 - 12*3) / 4;
+    metrics.forEach((m, i) => {
+      const mx = PAD + i * (cardW + 12);
+      c.fillStyle = C.bgCard;
+      r(mx, metricsY, cardW, METRICS_H - 4, 10);
+      c.strokeStyle = C.border; c.lineWidth = 1;
+      c.beginPath(); c.roundRect(mx, metricsY, cardW, METRICS_H - 4, 10); c.stroke();
+      // label
+      c.font = "bold 10px Arial, sans-serif";
+      c.fillStyle = C.textSec;
+      c.textAlign = "center";
+      c.fillText(m.label, mx + cardW/2, metricsY + 22);
+      // value
+      c.font = "bold 22px 'Courier New', monospace";
+      c.fillStyle = C.textAcc;
+      c.fillText(m.value, mx + cardW/2, metricsY + 56);
+      c.textAlign = "left";
+    });
+
+    /* ── 6. Indicator cards ──────────────────────────────────────── */
+    const indY  = metricsY + METRICS_H + 8;
+    const indW  = (W - PAD*2 - 12) / 2;
+    const dc    = d.duty_cycle;
+
+    // LED card
+    c.fillStyle = C.bgCard;
+    r(PAD, indY, indW, IND_H - 4, 10);
+    c.strokeStyle = C.border; c.lineWidth = 1;
+    c.beginPath(); c.roundRect(PAD, indY, indW, IND_H - 4, 10); c.stroke();
+    c.font = "bold 10px Arial, sans-serif";
+    c.fillStyle = C.textSec;
+    c.fillText("💡  LED BRIGHTNESS", PAD + 14, indY + 20);
+    // LED bar track
+    c.fillStyle = C.border;
+    r(PAD + 14, indY + 32, indW - 28, 10, 5);
+    // LED bar fill
+    const ledGrad = c.createLinearGradient(PAD+14, 0, PAD+14+(indW-28), 0);
+    ledGrad.addColorStop(0, C.orangeDeep);
+    ledGrad.addColorStop(1, C.orangeBrt);
+    c.fillStyle = ledGrad;
+    r(PAD + 14, indY + 32, (indW - 28) * (dc/100), 10, 5);
+    // LED label
+    c.font = "bold 13px 'Courier New', monospace";
+    c.fillStyle = C.textPrim;
+    c.textAlign = "center";
+    c.fillText(
+      dc <= 30 ? `🔅 Dim (${dc}%)` : dc <= 70 ? `💡 Medium (${dc}%)` : `🔆 Bright (${dc}%)`,
+      PAD + indW/2, indY + 68
+    );
+    c.textAlign = "left";
+
+    // Motor card
+    const mx2 = PAD + indW + 12;
+    c.fillStyle = C.bgCard;
+    r(mx2, indY, indW, IND_H - 4, 10);
+    c.strokeStyle = C.border; c.lineWidth = 1;
+    c.beginPath(); c.roundRect(mx2, indY, indW, IND_H - 4, 10); c.stroke();
+    c.font = "bold 10px Arial, sans-serif";
+    c.fillStyle = C.textSec;
+    c.fillText("⚙  MOTOR SPEED", mx2 + 14, indY + 20);
+    // Gauge arc
+    const cx = mx2 + indW/2, cy = indY + 72, rad2 = 32;
+    c.strokeStyle = C.border; c.lineWidth = 9; c.lineCap = "round";
+    c.beginPath(); c.arc(cx, cy, rad2, Math.PI, 0); c.stroke();
+    const arcColor = dc <= 20 ? "#52400a" : dc <= 50 ? C.orangeDeep : dc <= 75 ? C.orange : C.orangeBrt;
+    c.strokeStyle = arcColor; c.lineWidth = 9;
+    c.beginPath(); c.arc(cx, cy, rad2, Math.PI, Math.PI + Math.PI*(dc/100)); c.stroke();
+    c.font = "bold 14px 'Courier New', monospace";
+    c.fillStyle = C.textAcc;
+    c.textAlign = "center";
+    c.fillText(`${d.motor_rpm} RPM`, cx, indY + 60);
+    c.font = "11px Arial"; c.fillStyle = C.textSec;
+    c.fillText(d.motor_label, cx, indY + 80);
+    c.textAlign = "left";
+
+    /* ── 7. Footer ───────────────────────────────────────────────── */
+    const footY = H - FOOTER_H;
+    c.fillStyle = C.bgPanel;
+    c.fillRect(0, footY, W, FOOTER_H);
+    c.fillStyle = C.border;
+    c.fillRect(0, footY, W, 1);
+    c.fillStyle = tg; // orange bottom bar
+    c.fillRect(0, H - 4, W, 4);
+    c.font = "11px 'Courier New', monospace";
+    c.fillStyle = C.textSec;
+    c.fillText(
+      `Generated: ${new Date().toLocaleString()}  |  PWM Signal Simulator — EE Mini Project`,
+      PAD, footY + 22
+    );
+
+    /* ── Trigger download ─────────────────────────────────────────── */
+    const link    = document.createElement("a");
+    link.download = `pwm_report_${d.frequency}Hz_${d.duty_cycle}pct.png`;
+    link.href     = oc.toDataURL("image/png");
+    link.click();
+  };
 });
 
-
 /* ================================================================
-   10. KEYBOARD SHORTCUT — Enter to Generate
+   KEYBOARD SHORTCUT
    ================================================================ */
-
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !generateBtn.disabled) {
-    generateBtn.click();
-  }
+  if (e.key === "Enter" && !generateBtn.disabled) generateBtn.click();
 });
 
-
 /* ================================================================
-   10. KEYBOARD SHORTCUT — Enter to Generate
+   LIVE CANVAS ANIMATION ENGINE
    ================================================================ */
-
-document.addEventListener("keydown", (e) => {
-  if (e.key === "Enter" && !generateBtn.disabled) {
-    generateBtn.click();
-  }
-});
-
-
-/* ================================================================
-   11. LIVE PWM CANVAS ANIMATION ENGINE
-   ================================================================
-   How it works:
-   - A virtual "signal cursor" moves left-to-right across the canvas.
-   - At every frame we compute whether the cursor is in the HIGH or
-     LOW phase of the current cycle, draw one pixel column, and
-     scroll older columns to the left (oscilloscope-style).
-   - The waveform scrolls continuously so it looks "live".
-   ================================================================ */
-
-const canvas       = document.getElementById("pwmCanvas");
-const ctx          = canvas.getContext("2d");
-const animPlayPause = document.getElementById("animPlayPause");
-const animReset    = document.getElementById("animReset");
-const animSpeedSel = document.getElementById("animSpeed");
-const sigDot       = document.getElementById("sigDot");
-const sigStateText = document.getElementById("sigStateText");
-const animLed      = document.getElementById("animLed");
-const motorFan     = document.getElementById("motorFan");
-
-/* Animation state */
-let animParams = null;     // { frequency, dutyCycle, maxVoltage }
+let animParams  = null;
 let animRunning = false;
 let animPaused  = false;
 let rafId       = null;
+let tSeconds    = 0;
+let fanAngle    = 0;
+let lastTs      = null;
 
-/* Oscilloscope scroll state */
-let tSeconds    = 0;       // virtual time cursor (seconds)
-let fanAngle    = 0;       // motor fan rotation angle (degrees)
-let lastTs      = null;    // previous requestAnimationFrame timestamp
-
-/* Colour palette */
-const COLORS = {
-  gridDark:  "#0f1e33",
-  gridLight: "#dde8f5",
-  lineDark:  "#1a6cff",
-  lineLight: "#1a6cff",
-  glowDark:  "rgba(26,108,255,0.25)",
-  glowLight: "rgba(26,108,255,0.15)",
-  textDark:  "#3a5070",
-  textLight: "#94a3b8",
-  highDark:  "rgba(26,108,255,0.18)",
-  highLight: "rgba(26,108,255,0.10)",
-};
-
-/* ── Resize canvas to match CSS width ───────────────────────── */
 function resizeCanvas() {
   const rect = canvas.getBoundingClientRect();
-  if (canvas.width !== Math.floor(rect.width)) {
-    canvas.width = Math.floor(rect.width);
-  }
+  if (canvas.width !== Math.floor(rect.width)) canvas.width = Math.floor(rect.width);
 }
 
-/* ── Start animation with given PWM params ───────────────────── */
 function startAnimation(params) {
   animParams  = params;
   animRunning = true;
   animPaused  = false;
-  tSeconds    = 0;
-  lastTs      = null;
-  fanAngle    = 0;
-
-  // Enable controls
+  tSeconds    = 0; lastTs = null; fanAngle = 0;
   animPlayPause.disabled = false;
   animReset.disabled     = false;
   animPlayPause.textContent = "⏸ Pause";
-
-  // Clear canvas before starting
-  resizeCanvas();
-  clearCanvas();
-
-  // Start the loop
+  resizeCanvas(); clearCanvas();
   if (rafId) cancelAnimationFrame(rafId);
   rafId = requestAnimationFrame(animFrame);
 }
 
-/* ── Main animation loop ─────────────────────────────────────── */
 function animFrame(timestamp) {
   if (!animRunning || animPaused) return;
-
   resizeCanvas();
-
   if (!lastTs) lastTs = timestamp;
-  const wallDeltaMs = timestamp - lastTs;
-  lastTs = timestamp;
-
-  const speed  = parseFloat(animSpeedSel.value) || 1;
-  const deltaSec = (wallDeltaMs / 1000) * speed;
-
+  const wallDelta = timestamp - lastTs; lastTs = timestamp;
+  const speed     = parseFloat(animSpeedSel.value) || 0.5;
+  const deltaSec  = (wallDelta / 1000) * speed;
   tSeconds += deltaSec;
 
   const { frequency, dutyCycle, maxVoltage } = animParams;
-  const period    = 1 / frequency;
-  const onTime    = period * (dutyCycle / 100);
+  const period  = 1 / frequency;
+  const phase   = (tSeconds % period) / period;
+  const isHigh  = phase < (dutyCycle / 100);
 
-  // Where in the current cycle are we?
-  const phase     = (tSeconds % period) / period;   // 0 → 1
-  const isHigh    = phase < (dutyCycle / 100);
-  const voltage   = isHigh ? maxVoltage : 0;
-
-  /* ── Draw oscilloscope frame ── */
   drawOscilloscope(tSeconds, frequency, dutyCycle, maxVoltage, isHigh);
 
-  /* ── Update signal-state badge ── */
-  if (isHigh) {
-    sigDot.className = "sig-dot high";
-    sigStateText.textContent = `HIGH — ${maxVoltage.toFixed(1)} V`;
-  } else {
-    sigDot.className = "sig-dot low";
-    sigStateText.textContent = `LOW  — 0.0 V`;
-  }
+  // Signal badge
+  sigDot.className = isHigh ? "sig-dot high" : "sig-dot low";
+  sigStateText.textContent = isHigh ? `HIGH — ${maxVoltage.toFixed(1)} V` : `LOW  — 0.0 V`;
 
-  /* ── Animate LED ── */
-  // For duty cycles < 100, the LED flickers ON/OFF with the signal.
-  // But at very high frequencies the human eye sees average brightness,
-  // so we blend: above 60 Hz always-on glow, below 60 Hz hard ON/OFF.
+  // LED
   if (frequency >= 60) {
     animLed.classList.add("on");
-    // Dimming effect via opacity proportional to duty cycle
     animLed.style.opacity = 0.2 + 0.8 * (dutyCycle / 100);
   } else {
     animLed.style.opacity = "1";
-    if (isHigh) animLed.classList.add("on");
-    else        animLed.classList.remove("on");
+    isHigh ? animLed.classList.add("on") : animLed.classList.remove("on");
   }
 
-  /* ── Spin motor fan ── */
-  // Fan RPM proportional to duty cycle; max ~1800 visual degrees/sec
-  const degreesPerSec = (dutyCycle / 100) * 720;  // 0–720 deg/s
-  fanAngle = (fanAngle + degreesPerSec * deltaSec) % 360;
+  // Motor fan
+  fanAngle = (fanAngle + (dutyCycle / 100) * 720 * deltaSec) % 360;
   motorFan.style.transform = `rotate(${fanAngle}deg)`;
 
   rafId = requestAnimationFrame(animFrame);
 }
 
-/* ── Draw one frame of the scrolling oscilloscope ───────────── */
 function drawOscilloscope(tNow, frequency, dutyCycle, maxVoltage, isHigh) {
-  const W = canvas.width;
-  const H = canvas.height;
-  const isDark = document.documentElement.getAttribute("data-theme") !== "light";
-
-  /* How many seconds of history to show.
-     Dividing by speed makes the wave scroll visually slower at 0.1× and
-     faster at 0.5× — the waveform stretches/compresses across the canvas. */
-  const speed     = parseFloat(animSpeedSel.value) || 1;
+  const W = canvas.width, H = canvas.height;
+  const speed     = parseFloat(animSpeedSel.value) || 0.5;
   const period    = 1 / frequency;
   const windowSec = Math.max(0.005, Math.min(2.0, (period * 3) / speed));
   const pixPerSec = W / windowSec;
+  const tStart    = tNow - windowSec;
+  const pad       = H * 0.12;
+  const voltToY   = v => H - pad - (v / maxVoltage) * (H - 2 * pad);
 
-  /* Clear */
-  ctx.clearRect(0, 0, W, H);
+  // Read CSS vars so canvas respects dark/light theme
+  const cs       = getComputedStyle(document.documentElement);
+  const canvasBg = cs.getPropertyValue("--canvas-bg").trim()   || "#080800";
+  const canvasGr = cs.getPropertyValue("--canvas-grid").trim() || "#1a1400";
+  const canvasLn = cs.getPropertyValue("--canvas-line").trim() || "#f59e0b";
+  const canvasFl = cs.getPropertyValue("--canvas-fill").trim() || "rgba(245,158,11,0.12)";
+  const canvasTx = cs.getPropertyValue("--canvas-txt").trim()  || "#3a2f00";
 
-  /* Background */
-  ctx.fillStyle = isDark ? "#060a12" : "#f1f5fb";
+  // Clear
+  ctx.fillStyle = canvasBg;
   ctx.fillRect(0, 0, W, H);
 
-  /* Grid lines */
-  drawGrid(W, H, windowSec, maxVoltage, isDark);
-
-  /* Waveform path */
-  drawWaveformPath(W, H, tNow, windowSec, pixPerSec, frequency, dutyCycle, maxVoltage, isDark);
-
-  /* Moving cursor line */
-  drawCursor(W, H, isDark);
-
-  /* Voltage scale label */
-  drawVoltageLabel(H, maxVoltage, isDark);
-}
-
-/* Grid ─────────────────────────────────────────────────────── */
-function drawGrid(W, H, windowSec, maxVoltage, isDark) {
-  ctx.strokeStyle = isDark ? COLORS.gridDark : COLORS.gridLight;
-  ctx.lineWidth   = 0.5;
-
-  // Horizontal: 4 divisions
+  // Grid
+  ctx.strokeStyle = canvasGr; ctx.lineWidth = 0.5;
   for (let i = 0; i <= 4; i++) {
     const y = Math.round((i / 4) * H) + 0.5;
     ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
   }
-  // Vertical: 6 divisions
   for (let i = 0; i <= 6; i++) {
     const x = Math.round((i / 6) * W) + 0.5;
     ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
   }
-}
 
-/* Waveform path ─────────────────────────────────────────────── */
-function drawWaveformPath(W, H, tNow, windowSec, pixPerSec, frequency, dutyCycle, maxVoltage, isDark) {
-  const period  = 1 / frequency;
-  const tStart  = tNow - windowSec;   // left edge of window
-
-  const lineColor = isDark ? COLORS.lineDark  : COLORS.lineLight;
-  const glowColor = isDark ? COLORS.glowDark  : COLORS.glowLight;
-  const highFill  = isDark ? COLORS.highDark  : COLORS.highLight;
-
-  // Map voltage to canvas Y (0V = bottom, maxVoltage = top with padding)
-  const pad = H * 0.12;
-  const voltToY = (v) => H - pad - (v / maxVoltage) * (H - 2 * pad);
-
-  const yHigh = voltToY(maxVoltage);
-  const yLow  = voltToY(0);
-  const yMid  = voltToY(maxVoltage * (dutyCycle / 100)); // average line Y
-
-  /* ── Draw fill areas first (HIGH regions shaded) ── */
-  ctx.fillStyle = highFill;
-  let inFill = false;
-  let fillStartX = 0;
-
-  for (let px = 0; px <= W; px++) {
-    const t     = tStart + px / pixPerSec;
-    const phase = ((t % period) + period) % period / period;
-    const hi    = phase < dutyCycle / 100;
-
-    if (hi && !inFill) { fillStartX = px; inFill = true; }
-    if (!hi && inFill) {
-      ctx.fillRect(fillStartX, yHigh, px - fillStartX, yLow - yHigh);
-      inFill = false;
-    }
-  }
-  if (inFill) ctx.fillRect(fillStartX, yHigh, W - fillStartX, yLow - yHigh);
-
-  /* ── Average voltage dashed line ── */
-  ctx.strokeStyle = "#22c55e";
-  ctx.lineWidth   = 1;
-  ctx.setLineDash([4, 4]);
-  ctx.beginPath();
-  ctx.moveTo(0, yMid); ctx.lineTo(W, yMid);
-  ctx.stroke();
+  // Average line
+  const yMid = voltToY(maxVoltage * dutyCycle / 100);
+  ctx.strokeStyle = "#4ade80"; ctx.lineWidth = 1; ctx.setLineDash([4, 4]);
+  ctx.beginPath(); ctx.moveTo(0, yMid); ctx.lineTo(W, yMid); ctx.stroke();
   ctx.setLineDash([]);
 
-  /* ── Glow under waveform (draw twice: blur pass + crisp pass) ── */
+  // HIGH fill
+  ctx.fillStyle = canvasFl;
+  const yHigh = voltToY(maxVoltage), yLow = voltToY(0);
+  let inFill = false, fillX = 0;
+  for (let px = 0; px <= W; px++) {
+    const t = tStart + px / pixPerSec;
+    const ph = ((t % period) + period) % period / period;
+    const hi = ph < dutyCycle / 100;
+    if (hi && !inFill)  { fillX = px; inFill = true; }
+    if (!hi && inFill)  { ctx.fillRect(fillX, yHigh, px - fillX, yLow - yHigh); inFill = false; }
+  }
+  if (inFill) ctx.fillRect(fillX, yHigh, W - fillX, yLow - yHigh);
+
+  // Waveform — glow pass then crisp pass
   for (let pass = 0; pass < 2; pass++) {
     ctx.beginPath();
     let started = false;
-
     for (let px = 0; px <= W; px++) {
-      const t     = tStart + px / pixPerSec;
-      const phase = ((t % period) + period) % period / period;
-      const v     = phase < dutyCycle / 100 ? maxVoltage : 0;
-      const y     = voltToY(v);
-
-      // Detect transition edge: draw vertical line
+      const t   = tStart + px / pixPerSec;
+      const ph  = ((t % period) + period) % period / period;
+      const v   = ph < dutyCycle / 100 ? maxVoltage : 0;
+      const y   = voltToY(v);
       if (px > 0) {
-        const tPrev     = tStart + (px - 1) / pixPerSec;
-        const phasePrev = ((tPrev % period) + period) % period / period;
-        const vPrev     = phasePrev < dutyCycle / 100 ? maxVoltage : 0;
-        if (vPrev !== v) {
-          // vertical edge
-          ctx.lineTo(px, voltToY(vPrev));
-          ctx.lineTo(px, y);
-        }
+        const tP  = tStart + (px - 1) / pixPerSec;
+        const phP = ((tP % period) + period) % period / period;
+        const vP  = phP < dutyCycle / 100 ? maxVoltage : 0;
+        if (vP !== v) { ctx.lineTo(px, voltToY(vP)); ctx.lineTo(px, y); }
       }
-
-      if (!started) { ctx.moveTo(px, y); started = true; }
-      else ctx.lineTo(px, y);
+      started ? ctx.lineTo(px, y) : (ctx.moveTo(px, y), started = true);
     }
-
     if (pass === 0) {
-      // glow pass
-      ctx.shadowBlur  = 10;
-      ctx.shadowColor = lineColor;
-      ctx.strokeStyle = glowColor;
-      ctx.lineWidth   = 6;
+      ctx.shadowBlur = 12; ctx.shadowColor = "#a855f7";
+      ctx.strokeStyle = canvasLn.replace(")", ",0.3)").replace("rgb(","rgba("); ctx.lineWidth = 7;
     } else {
-      // crisp pass
-      ctx.shadowBlur  = 0;
-      ctx.strokeStyle = lineColor;
-      ctx.lineWidth   = 2;
+      ctx.shadowBlur = 0;
+      ctx.strokeStyle = canvasLn; ctx.lineWidth = 2.5;
     }
     ctx.stroke();
-    ctx.beginPath();
   }
   ctx.shadowBlur = 0;
-}
 
-/* Moving cursor at right edge ───────────────────────────────── */
-function drawCursor(W, H, isDark) {
-  ctx.strokeStyle = isDark ? "rgba(255,255,255,0.15)" : "rgba(0,0,0,0.12)";
-  ctx.lineWidth   = 1;
+  // Voltage labels
+  ctx.fillStyle = canvasTx; ctx.font = "10px 'JetBrains Mono',monospace";
+  ctx.fillText(`${maxVoltage}V`, 4, pad + 4);
+  ctx.fillText("0V", 4, H - pad + 4);
+
+  // Cursor
+  ctx.strokeStyle = "rgba(255,255,255,0.1)"; ctx.lineWidth = 1;
   ctx.setLineDash([3, 3]);
   ctx.beginPath(); ctx.moveTo(W - 1, 0); ctx.lineTo(W - 1, H); ctx.stroke();
   ctx.setLineDash([]);
 }
 
-/* Voltage labels on left axis ───────────────────────────────── */
-function drawVoltageLabel(H, maxVoltage, isDark) {
-  ctx.fillStyle = isDark ? COLORS.textDark : COLORS.textLight;
-  ctx.font      = "10px 'JetBrains Mono', monospace";
-  const pad = H * 0.12;
-  ctx.fillText(`${maxVoltage}V`, 4, pad + 4);
-  ctx.fillText("0V",            4, H - pad + 4);
-}
-
-/* Clear canvas to background ────────────────────────────────── */
 function clearCanvas() {
-  const isDark = document.documentElement.getAttribute("data-theme") !== "light";
-  ctx.fillStyle = isDark ? "#060a12" : "#f1f5fb";
+  const _cs = getComputedStyle(document.documentElement);
+  ctx.fillStyle = _cs.getPropertyValue("--canvas-bg").trim() || "#080800";
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 }
 
-/* ── Play / Pause button ─────────────────────────────────────── */
+// Play/Pause
 animPlayPause.addEventListener("click", () => {
   if (!animRunning) return;
   animPaused = !animPaused;
   animPlayPause.textContent = animPaused ? "▶ Play" : "⏸ Pause";
-
-  if (!animPaused) {
-    lastTs = null;   // reset delta to avoid time-jump on resume
-    rafId = requestAnimationFrame(animFrame);
-  }
+  if (!animPaused) { lastTs = null; rafId = requestAnimationFrame(animFrame); }
 });
 
-/* ── Reset button ────────────────────────────────────────────── */
+// Reset
 animReset.addEventListener("click", () => {
   if (!animParams) return;
-  tSeconds = 0;
-  fanAngle = 0;
-  lastTs   = null;
-  animPaused = false;
+  tSeconds = 0; fanAngle = 0; lastTs = null; animPaused = false;
   animPlayPause.textContent = "⏸ Pause";
   clearCanvas();
   if (!rafId) rafId = requestAnimationFrame(animFrame);
 });
 
-/* ── Hook into generate flow: start animation after data arrives */
-// We patch the existing generate handler to also call startAnimation.
-// Store original reference, then wrap it.
-const _originalGenerateClick = generateBtn.onclick;
-generateBtn.addEventListener("click", () => {
-  // After AJAX responds we need the params — watch for metric update as signal
-});
-
-/* Expose a hook called by the AJAX handler */
-function onGenerateSuccess(data) {
-  startAnimation({
-    frequency:  data.frequency,
-    dutyCycle:  data.duty_cycle,
-    maxVoltage: data.max_voltage,
-  });
-}
-
-/* ── Patch renderChart to also trigger animation ────────────── */
-const _origRenderChart = renderChart;
-// We reassign renderChart so that after Plotly renders, animation starts.
-// The global renderChart is already called inside the fetch handler.
-// Instead we hook into the fetch handler's `data` path via a global flag.
-
-/* Simpler approach: add a MutationObserver on avgVoltage to know render done.
-   Actually simplest: just call onGenerateSuccess from inside the fetch block.
-   We do this by replacing the fetch callback section. Since the fetch is inside
-   an async IIFE attached to generateBtn, we instead intercept via a custom event. */
-
+// Hook animation start
 document.addEventListener("pwmGenerated", (e) => {
-  onGenerateSuccess(e.detail);
+  startAnimation({
+    frequency:  e.detail.frequency,
+    dutyCycle:  e.detail.duty_cycle,
+    maxVoltage: e.detail.max_voltage,
+  });
 });
 
-/* ── Resize handler ──────────────────────────────────────────── */
 window.addEventListener("resize", () => {
   resizeCanvas();
   if (!animRunning || animPaused) clearCanvas();
